@@ -19,11 +19,15 @@ I followed the [Digitalocean swapfile tutorial](https://www.digitalocean.com/com
 
     # change permissions to root
     sudo chmod 600 /etc/swapfile
-    ls -lh swapfile
+    ls -lh /etc/swapfile
 
     # show swap (optional turn off old swapfile)
     show -s
     sudo swapoff /var/swap
+
+    # designate the swapfile as swap
+    sudo mkswap /etc/swapfile
+    sudo swapon /etc/swapfile
 
     # make the file permanent at reboot
     sudo nano /etc/fstab
