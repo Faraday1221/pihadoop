@@ -1,5 +1,4 @@
-# wlan0 appears not to work eth0 default port instead
-I may need to go back and fix the 255.255.255.255 that was "fixed" in the config file to get my pi's back on the right network... i.e. on wlan0 such that I can use the browser to check their status!
+
 
 ### Reference
 
@@ -80,58 +79,8 @@ We can then monitor the Spark cluster via `192.168.1.165:8080`. If we want to sh
 
     /opt/spark/sbin/stop-all.sh
 
-## Test the Spark Shell
-Once Spark is installed we can perform a basic test to see that it runs correctly using the spark-shell and pyspark
 
-To test the spark shell run the following `bin/spark-shell --master local[4]` (DO WE WANT local[3] since we only have 3 nodes).
-
-Note this generated the error `/opt/spark/metastore_db cannot be created` which eats a ton of screen real estate. This post looks like it may address the issue
-[Spark Shell doesnt start correctly](http://stackoverflow.com/questions/36273166/spark-shell-doesnt-start-correctly-spark1-6-1-bin-hadoop2-6-version). **I haven't read it yet**. Eventually however the Spark Prompt did appear.
-
-    Welcome to
-          ____              __
-         / __/__  ___ _____/ /__
-        _\ \/ _ \/ _ `/ __/  '_/
-       /___/ .__/\_,_/_/ /_/\_\   version 2.1.0
-          /_/
-
-    Using Scala version 2.11.8 (Java HotSpot(TM) Client VM, Java 1.8.0_65)
-    Type in expressions to have them evaluated.
-    Type :help for more information.__
-
-
-Running the test command `sc.textFile("README.md").count` produced an error
-
-
-
-
-    scala> sc.textFile("README.md").count
-    <console>:18: error: not found: value sc
-           sc.textFile("README.md").count
-           ^
-
-
-## Test the PySpark Console
-
-after running the <> command we have the same error as before
-
-    17/01/18 13:24:34 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
-    Wed Jan 18 13:24:43 EST 2017 Thread[Thread-2,5,main] java.io.FileNotFoundException: derby.log (Permission denied)
-    Wed Jan 18 13:24:44 EST 2017 Thread[Thread-2,5,main] Cleanup action starting
-    ERROR XBM0H: Directory /opt/spark/metastore_db cannot be created.
-
-once again, it looks like we have the expected prompt, but spark throws an error on the test example. **The good news is if its the same error in both places perhaps we only have 1 thing to fix**
-
-    >>> sc.textFile("README.md").count()
-    Traceback (most recent call last):
-    File "<stdin>", line 1, in <module>
-    NameError: name 'sc' is not defined
-
-
-# Updates
-
-It appears that the issues above were simply due to file permissions, I had hoped this was the case but since nothing is ever really simple I doubted myself. Turns out things work out much better running from user `pi` rather than `hduser` which did not have root permissions and couldnt make the required db directory.
-
+## Spark Config
 Also I completely skipped any kind of Spark config setup. This is almost certainly a mistake. [Quora has a great post on a Spark on cluster config](https://www.quora.com/How-do-I-set-up-Apache-Spark-with-Yarn-Cluster).
 
 ## Testing Spark Shell
@@ -211,7 +160,7 @@ Once again it appears to be successful.
  - spark performance can be viewed in the browser via `http://192.168.1.165:4040`, note that this is the node1 address with port `4040`. See documentation [here](http://spark.apache.org/docs/latest/monitoring.html)
 
 
-### Spark Environment Variables
+### Spark Environment Variables - A look back at Hadoop Config
 Directly from the official Spark Documentation
 > Ensure that HADOOP_CONF_DIR or YARN_CONF_DIR points to the directory which contains the (client side) configuration files for the Hadoop cluster.
 
@@ -222,7 +171,7 @@ Neither of these variables are set as part of the Hadoop Setup, **what do we use
 
 It turns out this is actually in the system, which isnt wholly surprising given that it is the only env variable recommended in the HADOOP setup documentation! The variable is housed in `/opt/hadoop/etc/hadoop/hadoop-env.sh` and found on line 34 as `export HADOOP_CONF_DIR=${HADOOP_CONF_DIR:-"/etc/hadoop"}`. However this file is not called!  running `source /opt/hadoop/etc/hadoop/hadoop-env.sh` changes HADOOP_CONF_DIR to `/etc/hadoop` while we have installed hadoop to `/opt/hadoop`. Trying to start or stop a cluster no longer works as expected!
 
-It looks a bit like this is all a bit of a miscommunication in the setup, both hadoop and yarn are setup via the bash.bashrc to use `/opt/hadoop` but that file does not have the two recommended envirnment variables HADOOP_CONF_DIR and YARN_CONF_DIR. So we will simply go into bash.bashrc and just add these variables to use `/opt/hadoop` as the system would expect anyway!
+It looks a bit like this is all a bit of a miscommunication in the setup, both hadoop and yarn are setup via the `/etc/bash.bashrc` to use `/opt/hadoop` but that file does not have the two recommended envirnment variables HADOOP_CONF_DIR and YARN_CONF_DIR. So we will simply go into `/etc/bash.bashrc` and just add these variables to use `/opt/hadoop` as the system would expect anyway!
 
     I also have a two line ‘spark-env.sh’ file, which is inside the ‘conf’ directory of Spark:
 
@@ -231,9 +180,13 @@ It looks a bit like this is all a bit of a miscommunication in the setup, both h
 
     (I’m not even sure this is necessary, since we will be running on YARN)
 
-# network error
-after getting the 3 nodes to work, the network no longer uses wlan0 as expected
 
+### Enviornment Variables & Errors
+ **NativeCodeLoader Error**
+
+    WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+
+This is caused when the path for the hadoop native library files is not found, it is resolved by setting the following Environment variable:
 
 
 
@@ -243,7 +196,7 @@ There is some mixed guidance on this topic including the quote below from (DQYDJ
 >I also have a two line ‘spark-env.sh’ file, which is inside the ‘conf’ directory of Spark: (I’m not even sure this is necessary, since we will be running on YARN)
 
 >SPARK_MASTER_IP=192.168.1.50
-SPARK_WORKER_MEMORY=512m
+>SPARK_WORKER_MEMORY=512m
 
 Then directly from the Apache [Running Spark on YARN Documentation](http://spark.apache.org/docs/latest/running-on-yarn.html)
 
@@ -259,51 +212,23 @@ After some reading it seems that we want to run Spark in `standalone mode` as it
 The official guidance for Standalone Mode is:
 > To install Spark Standalone mode, you simply place a compiled version of Spark on each node on the cluster.
 
-### Launching Spark the Hard Way
-Currently we can get our cluster up and running through a painful manual process. **The pain is essentially that I do not have my permissions set correctly and must enter passwords and ssh between nodes to turn each on individually.** The process is essentially as follows:
-
-- manually turn on the master (node1)
-    - manual password entry
-- manually turn the slaves (node1,node2,node3)
-    - requires a manual lookup of the master address
-    - ssh into each node
-    - manual password entry
-
-
-This process looks roughly like the following. Turning on the nodes is facilitates by the shell scripts in `/opt/spark/sbin`.
-
-    # turn on the master (node1)
-    hduser@node1:~ $ sudo /opt/spark/sbin/start-master.sh
-
-look up the port of the master using the browser at address `192.168.0.165:8080` here it was set as `spark://node1:7077`. Note that as each Worker node goes live it will display in the browser.
-
-    # turn on the slave (node1) requires a password
-    hduser@node1:~ $ sudo /opt/spark/sbin/start-slave.sh spark://node1:7077
-
-    # ssh to the next node
-    ssh node2
-
-    # turn on the slave (node2) requires a password
-    hduser@node2:~ $ sudo /opt/spark/sbin/start-slave.sh spark://node1:7077
-
-    # ssh to the next node
-    ssh node3
-
-    # turn on the slave (node3) requires a password
-    hduser@node3:~ $ sudo /opt/spark/sbin/start-slave.sh spark://node1:7077
-
 Without configuring any of the Worker nodes the default values are set to 1 GB of memory each (1024 MB) and 4 Cores.
 
-**AFTER FIXING THE FILE PERMISSIONS**
 
-### Preparing for an easier launch
+
+##  Starting the Spark Cluster
 The immediate things that need to be addressed such that we can use simple scripts such as `/opt/spark/start-all.sh` or `/opt/spark/start-slaves.sh` is to fix the Permission denied issue when this is run.
 
 
 
 
 
+## Opening a Spark Session
+Now that the culster is spun up it is awaiting commands from an application. To open a console to interact with Spark directly we can run:
 
+    /opt/spark/bin/spark-shell --master spark://node1:7077
+
+We can check the progress of this session using the browser at `http://node1:8080` which will confirm the (internal address?) and the master and slave nodes, along with their address, number of cores, and memory. (note this is standalone mode)
 
 
 
